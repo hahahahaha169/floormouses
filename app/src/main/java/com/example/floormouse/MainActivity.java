@@ -53,11 +53,34 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        status=label("마우스 준비 중...",false);
-        motion=label("카메라 준비 중...",false);
-        hid=new HidMouseController(this, msg -> status.setText(msg));
-        createUi();
-        ensurePermissions();
+        try {
+            status=label("마우스 준비 중...",false);
+            motion=label("카메라 준비 중...",false);
+            hid=new HidMouseController(this, msg -> {
+                if(status!=null) status.setText(msg);
+            });
+            createUi();
+            // Show the user interface before starting optional hardware services.
+            ui.post(() -> {
+                try { ensurePermissions(); }
+                catch(Throwable error) { showStartupError("기기 초기화 오류",error); }
+            });
+        } catch(Throwable error){
+            showStartupError("초기 화면 실행 오류",error);
+        }
+    }
+    private void showStartupError(String title,Throwable error){
+        android.util.Log.e("FloorMouse",title,error);
+        String detail=error.getClass().getSimpleName();
+        if(error.getMessage()!=null)detail+=": "+error.getMessage();
+        TextView fallback=new TextView(this);
+        fallback.setText("바닥 마우스 실행 진단\n\n"+title+"\n"+detail+
+            "\n\n이 오류 화면을 캡처해 주세요.");
+        fallback.setTextColor(0xFFF0F4FB);
+        fallback.setTextSize(17);
+        fallback.setPadding(dp(24),dp(60),dp(24),dp(24));
+        fallback.setBackgroundColor(0xFF0B1220);
+        setContentView(fallback);
     }
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private TextView label(String text,boolean title){
@@ -533,6 +556,6 @@ public class MainActivity extends Activity {
         try{if(reader!=null)reader.close();}catch(Exception ignored){}
         try{if(previewSurface!=null)previewSurface.release();}catch(Exception ignored){}
         if(cameraThread!=null){cameraThread.quitSafely();}
-        hid.close();super.onDestroy();
+        if(hid!=null)hid.close();super.onDestroy();
     }
 }
