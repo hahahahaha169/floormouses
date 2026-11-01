@@ -134,30 +134,103 @@ public class MainActivity extends Activity {
         add(parent,row);
     }
 
+    private FrameLayout tabPages;
+    private LinearLayout mousePage;
+    private ScrollView settingsPage;
+    private TextView mouseTab;
+    private TextView settingsTab;
+    private CustomButtonPanel mousePanel;
+
+    private TextView tabButton(String title){
+        TextView v=heading(title,16,WHITE);
+        v.setGravity(android.view.Gravity.CENTER);
+        v.setMinHeight(dp(50));
+        v.setTypeface(android.graphics.Typeface.create("sans-serif-medium",
+            android.graphics.Typeface.NORMAL));
+        return v;
+    }
+
+    private void showTab(boolean settings) {
+        // Keep both pages in the view tree. This lets the camera TextureView
+        // stay attached while the mouse page covers the settings page.
+        if(settings) settingsPage.bringToFront();
+        else mousePage.bringToFront();
+        tabPages.invalidate();
+        mouseTab.setTextColor(settings?MUTED:WHITE);
+        settingsTab.setTextColor(settings?WHITE:MUTED);
+        mouseTab.setBackground(rounded(settings?PANEL:ACCENT,12));
+        settingsTab.setBackground(rounded(settings?ACCENT:PANEL,12));
+    }
+
     private void createUi(){
         getWindow().setStatusBarColor(DARK);
         getWindow().setNavigationBarColor(DARK);
         getWindow().getDecorView().setSystemUiVisibility(0);
-        ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(DARK);
-        LinearLayout root=new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18),dp(14),dp(18),dp(28));
-        scroll.addView(root);
-        setContentView(scroll);
 
-        add(root,heading("바닥 마우스",28,WHITE));
-        verticalGap(root,4);
-        add(root,heading("플립4를 무선 광학 마우스로",14,MUTED));
-        verticalGap(root,15);
+        LinearLayout root=new LinearLayout(this);
+        root.setBackgroundColor(DARK);
+        root.setOrientation(LinearLayout.VERTICAL);
+        setContentView(root);
+
+        LinearLayout header=new LinearLayout(this);
+        header.setPadding(dp(18),dp(8),dp(18),dp(4));
+        header.setOrientation(LinearLayout.VERTICAL);
+        add(header,heading("바닥 마우스",24,WHITE));
+        add(root,header);
+
+        LinearLayout tabs=new LinearLayout(this);
+        tabs.setPadding(dp(12),dp(5),dp(12),dp(9));
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        mouseTab=tabButton("🖱 마우스");
+        settingsTab=tabButton("⚙ 설정");
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,dp(50),1);
+        left.setMargins(0,0,dp(5),0);
+        tabs.addView(mouseTab,left);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,dp(50),1);
+        right.setMargins(dp(5),0,0,0);
+        tabs.addView(settingsTab,right);
+        add(root,tabs);
+
+        tabPages=new FrameLayout(this);
+        root.addView(tabPages,new LinearLayout.LayoutParams(-1,0,1));
+
+        settingsPage=new ScrollView(this);
+        settingsPage.setBackgroundColor(DARK);
+        settingsPage.setFillViewport(true);
+        settingsPage.setClickable(true);
+        LinearLayout settingsRoot=new LinearLayout(this);
+        settingsRoot.setOrientation(LinearLayout.VERTICAL);
+        settingsRoot.setPadding(dp(18),dp(16),dp(18),dp(28));
+        settingsPage.addView(settingsRoot);
+        tabPages.addView(settingsPage,new FrameLayout.LayoutParams(-1,-1));
+
+        add(settingsRoot,heading("환경 설정",22,WHITE));
+        verticalGap(settingsRoot,5);
+        add(settingsRoot,heading("연결과 카메라, 버튼 배치를 여기서 관리하세요.",13,MUTED));
+        verticalGap(settingsRoot,16);
 
         status.setTextColor(0xFFB9DCFF);
         status.setTextSize(14);
         status.setPadding(dp(14),dp(12),dp(14),dp(12));
         status.setBackground(rounded(PANEL_SOFT,12));
-        add(root,status);
-        verticalGap(root,5);
+        add(settingsRoot,status);
+        verticalGap(settingsRoot,12);
+
+        LinearLayout connection=card();
+        add(connection,heading("블루투스 연결",17,WHITE));
+        verticalGap(connection,12);
+        pairRow(connection,
+            pill("① 마우스 등록",ACCENT,()->{ensurePermissions();hid.start();}),
+            pill("② 기기 연결",0xFF314862,this::chooseDevice));
+        verticalGap(connection,10);
+        pairRow(connection,
+            pill("기기 검색 허용",0xFF29394E,this::discoverable),
+            pill("커서 이동 시험",0xFF29394E,()->{
+                if(hid.isConnected()) hid.move(60,0);
+                else status.setText("먼저 다른 기기와 연결해 주세요.");
+            }));
+        add(settingsRoot,connection);
+        verticalGap(settingsRoot,12);
 
         LinearLayout cameraCard=card();
         add(cameraCard,heading("📷 실시간 바닥 카메라",17,WHITE));
@@ -173,53 +246,14 @@ public class MainActivity extends Activity {
             @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface){return true;}
             @Override public void onSurfaceTextureUpdated(SurfaceTexture surface){}
         });
-        cameraCard.addView(previewView,new LinearLayout.LayoutParams(-1,dp(155)));
+        cameraCard.addView(previewView,new LinearLayout.LayoutParams(-1,dp(170)));
         verticalGap(cameraCard,7);
-        add(cameraCard,heading("카메라가 바라보는 바닥을 실시간으로 표시합니다.",12,MUTED));
-        add(root,cameraCard);
-        verticalGap(root,12);
-
-        CustomButtonPanel mouse=new CustomButtonPanel(this,hid);
-        add(root,mouse);
-        LinearLayout.LayoutParams mouseParams=(LinearLayout.LayoutParams)mouse.getLayoutParams();
-        mouseParams.height=dp(370);
-        mouse.setLayoutParams(mouseParams);
-
-        TextView instruction=heading("왼쪽·오른쪽 클릭  |  휠 스크롤  |  사용자 버튼",13,MUTED);
-        instruction.setGravity(android.view.Gravity.CENTER);
-        add(root,instruction);
-        verticalGap(root,9);
-
-        TextView editButton=pill("✎ 버튼 편집",0xFF314862,()->{});
-        editButton.setOnClickListener(v->{
-            mouse.setEditing(!mouse.isEditing());
-            editButton.setText(mouse.isEditing()?"✓ 편집 완료":"✎ 버튼 편집");
-            status.setText(mouse.isEditing()
-                ?"편집 중: 추가한 버튼을 끌어서 이동하거나 눌러 수정하세요."
-                :"버튼 배치를 저장했어요.");
-        });
-        pairRow(root,
-            pill("＋ 버튼 추가",ACCENT,()->mouse.addButton()),editButton);
-        verticalGap(root,15);
-
-        LinearLayout connection=card();
-        add(connection,heading("블루투스 연결",17,WHITE));
-        verticalGap(connection,12);
-        pairRow(connection,
-            pill("① 마우스 등록",ACCENT,()->{ensurePermissions();hid.start();}),
-            pill("② 기기 연결",0xFF314862,this::chooseDevice));
-        verticalGap(connection,10);
-        pairRow(connection,
-            pill("기기 검색 허용",0xFF29394E,this::discoverable),
-            pill("커서 이동 시험",0xFF29394E,()->{
-                if(hid.isConnected())hid.move(60,0);
-                else status.setText("먼저 다른 기기와 연결해 주세요.");
-            }));
-        add(root,connection);
-        verticalGap(root,12);
+        add(cameraCard,heading("바닥을 촬영하는 화면입니다. 마우스 탭에서도 카메라는 계속 움직임을 추적합니다.",12,MUTED));
+        add(settingsRoot,cameraCard);
+        verticalGap(settingsRoot,12);
 
         LinearLayout options=card();
-        add(options,heading("마우스 설정",17,WHITE));
+        add(options,heading("마우스 움직임",17,WHITE));
         verticalGap(options,12);
         pairRow(options,
             torchButton=pill("🔦 손전등 켜짐",0xFF314862,()->{
@@ -254,7 +288,6 @@ public class MainActivity extends Activity {
         motion.setTextSize(13);
         add(options,motion);
         verticalGap(options,9);
-
         LinearLayout advanced=new LinearLayout(this);
         advanced.setOrientation(LinearLayout.VERTICAL);
         advanced.setVisibility(android.view.View.GONE);
@@ -274,11 +307,44 @@ public class MainActivity extends Activity {
         add(options,more);
         verticalGap(options,9);
         add(options,advanced);
-        add(root,options);
-        verticalGap(root,16);
+        add(settingsRoot,options);
+        verticalGap(settingsRoot,12);
 
-        TextView note=heading("카메라를 바닥에서 5~15cm 정도 띄워 보세요. 무늬 있는 매트에서 더 잘 작동합니다. 블루투스 마우스 기능은 기기마다 지원 여부가 다릅니다.",12,MUTED);
-        add(root,note);
+        LinearLayout buttonsCard=card();
+        add(buttonsCard,heading("사용자 버튼 관리",17,WHITE));
+        verticalGap(buttonsCard,8);
+        add(buttonsCard,heading("버튼을 추가하거나 편집하면 마우스 탭에 배치됩니다.",12,MUTED));
+        verticalGap(buttonsCard,12);
+        TextView editButton=pill("✎ 버튼 편집",0xFF314862,()->{});
+        editButton.setOnClickListener(v->{
+            mousePanel.setEditing(!mousePanel.isEditing());
+            editButton.setText(mousePanel.isEditing()?"✓ 편집 완료":"✎ 버튼 편집");
+            status.setText(mousePanel.isEditing()
+                ?"편집 모드: 마우스 화면에서 추가 버튼을 끌어 이동하거나 눌러 수정하세요."
+                :"버튼 배치를 저장했습니다.");
+            if(mousePanel.isEditing())showTab(false);
+        });
+        pairRow(buttonsCard,
+            pill("＋ 버튼 추가",ACCENT,()->mousePanel.addButton()),
+            editButton);
+        verticalGap(buttonsCard,8);
+        add(buttonsCard,heading("편집을 누른 뒤 마우스 탭에서 버튼을 이동하고, 설정에서 편집 완료를 눌러주세요.",12,MUTED));
+        add(settingsRoot,buttonsCard);
+        verticalGap(settingsRoot,16);
+        add(settingsRoot,heading("카메라를 바닥에서 5~15cm 정도 띄워 보세요. 무늬 있는 매트에서 더 잘 인식합니다. 기기에 따라 블루투스 마우스 기능이 지원되지 않을 수 있습니다.",12,MUTED));
+
+        mousePage=new LinearLayout(this);
+        mousePage.setOrientation(LinearLayout.VERTICAL);
+        mousePage.setBackgroundColor(DARK);
+        mousePage.setPadding(dp(10),dp(4),dp(10),dp(14));
+        mousePage.setClickable(true);
+        mousePanel=new CustomButtonPanel(this,hid);
+        mousePage.addView(mousePanel,new LinearLayout.LayoutParams(-1,0,1));
+        tabPages.addView(mousePage,new FrameLayout.LayoutParams(-1,-1));
+
+        mouseTab.setOnClickListener(v->showTab(false));
+        settingsTab.setOnClickListener(v->showTab(true));
+        showTab(false);
     }
     private boolean hasPermissions(){
         if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)return false;
