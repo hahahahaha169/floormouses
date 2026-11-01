@@ -66,63 +66,186 @@ public class MainActivity extends Activity {
     private void add(LinearLayout layout,android.view.View v){
         layout.addView(v,new LinearLayout.LayoutParams(-1,-2));
     }
+    private static final int DARK = 0xFF0B1220;
+    private static final int PANEL = 0xFF182338;
+    private static final int PANEL_SOFT = 0xFF202F47;
+    private static final int ACCENT = 0xFF399AFF;
+    private static final int WHITE = 0xFFF5F9FF;
+    private static final int MUTED = 0xFFA3B5CB;
+
+    private TextView heading(String message, int textSize, int color) {
+        TextView v=new TextView(this);
+        v.setText(message);
+        v.setTextSize(textSize);
+        v.setTextColor(color);
+        v.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        return v;
+    }
+
+    private android.graphics.drawable.GradientDrawable rounded(int color, int radius) {
+        android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(radius));
+        return bg;
+    }
+
+    private TextView pill(String message, int color, Runnable action) {
+        TextView v=heading(message, 14, WHITE);
+        v.setGravity(android.view.Gravity.CENTER);
+        v.setTypeface(android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL));
+        v.setMinHeight(dp(50));
+        v.setBackground(rounded(color, 13));
+        v.setOnClickListener(view -> action.run());
+        v.setClickable(true);
+        v.setFocusable(true);
+        return v;
+    }
+
+    private LinearLayout card() {
+        LinearLayout card=new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16),dp(14),dp(16),dp(16));
+        android.graphics.drawable.GradientDrawable b=rounded(PANEL, 18);
+        b.setStroke(dp(1),0xFF2F415A);
+        card.setBackground(b);
+        return card;
+    }
+
+    private void verticalGap(LinearLayout layout, int size) {
+        android.view.View v=new android.view.View(this);
+        layout.addView(v,new LinearLayout.LayoutParams(1,dp(size)));
+    }
+
+    private void pairRow(LinearLayout parent, TextView left, TextView right) {
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams l=new LinearLayout.LayoutParams(0,dp(50),1);
+        l.setMargins(0,0,dp(5),0);
+        row.addView(left,l);
+        LinearLayout.LayoutParams r=new LinearLayout.LayoutParams(0,dp(50),1);
+        r.setMargins(dp(5),0,0,0);
+        row.addView(right,r);
+        add(parent,row);
+    }
+
     private void createUi(){
+        getWindow().setStatusBarColor(DARK);
+        getWindow().setNavigationBarColor(DARK);
+        getWindow().getDecorView().setSystemUiVisibility(0);
         ScrollView scroll=new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(247,250,252));
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(DARK);
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18),dp(20),dp(18),dp(25));
+        root.setPadding(dp(18),dp(14),dp(18),dp(28));
         scroll.addView(root);
         setContentView(scroll);
-        add(root,label("🔦 플립4 바닥 마우스",true));
-        add(root,label("카메라가 바닥의 무늬 이동을 추적해 블루투스로 커서를 움직입니다.",false));
+
+        add(root,heading("바닥 마우스",28,WHITE));
+        verticalGap(root,4);
+        add(root,heading("플립4를 무선 광학 마우스로",14,MUTED));
+        verticalGap(root,15);
+
+        status.setTextColor(0xFFB9DCFF);
+        status.setTextSize(14);
+        status.setPadding(dp(14),dp(12),dp(14),dp(12));
+        status.setBackground(rounded(PANEL_SOFT,12));
         add(root,status);
-        add(root,button("① 블루투스 마우스 등록",()->{ensurePermissions();hid.start();}));
-        add(root,button("② 다른 기기에서 검색 허용",this::discoverable));
-        add(root,button("③ 페어링된 기기 연결",this::chooseDevice));
-        add(root,button("④ 연결 테스트 (커서 오른쪽 이동)",()->{
-            if(hid.isConnected()) hid.move(55,0);
-            else status.setText("먼저 다른 기기와 블루투스를 연결해 주세요.");
-        }));
-        add(root,motion);
-        torchButton=button("손전등 켜짐 (누르면 끄기)",()->{
-            torch=!torch;
-            torchButton.setText(torch?"손전등 켜짐 (누르면 끄기)":"손전등 꺼짐 (누르면 켜기)");
-            applyCapture();
-        });add(root,torchButton);
-        pauseButton=button("마우스 이동 일시정지",()->{
-            paused=!paused;tracker.reset();
-            pauseButton.setText(paused?"마우스 이동 다시 시작":"마우스 이동 일시정지");
-        });add(root,pauseButton);
-        speedText=label("커서 속도: 2.5배",false);add(root,speedText);
-        SeekBar seek=new SeekBar(this);seek.setMax(55);seek.setProgress(20);
+        verticalGap(root,5);
+
+        MouseSurfaceView mouse=new MouseSurfaceView(this,new MouseSurfaceView.Listener(){
+            @Override public void buttonDown(int button){hid.buttonDown(button);}
+            @Override public void buttonUp(int button){hid.buttonUp(button);}
+            @Override public void wheel(int ticks){
+                int n=Math.min(10,Math.abs(ticks));
+                for(int i=0;i<n;i++)hid.wheel(ticks>0);
+            }
+        });
+        add(root,mouse);
+        LinearLayout.LayoutParams mouseParams=(LinearLayout.LayoutParams)mouse.getLayoutParams();
+        mouseParams.height=dp(393);
+        mouse.setLayoutParams(mouseParams);
+        TextView instruction=heading("왼쪽·오른쪽 누르기   |   가운데 휠 쓸기",13,MUTED);
+        instruction.setGravity(android.view.Gravity.CENTER);
+        add(root,instruction);
+        verticalGap(root,15);
+
+        LinearLayout connection=card();
+        add(connection,heading("블루투스 연결",17,WHITE));
+        verticalGap(connection,12);
+        pairRow(connection,
+            pill("① 마우스 등록",ACCENT,()->{ensurePermissions();hid.start();}),
+            pill("② 기기 연결",0xFF314862,this::chooseDevice));
+        verticalGap(connection,10);
+        pairRow(connection,
+            pill("기기 검색 허용",0xFF29394E,this::discoverable),
+            pill("커서 이동 시험",0xFF29394E,()->{
+                if(hid.isConnected())hid.move(60,0);
+                else status.setText("먼저 다른 기기와 연결해 주세요.");
+            }));
+        add(root,connection);
+        verticalGap(root,12);
+
+        LinearLayout options=card();
+        add(options,heading("마우스 설정",17,WHITE));
+        verticalGap(options,12);
+        pairRow(options,
+            torchButton=pill("🔦 손전등 켜짐",0xFF314862,()->{
+                torch=!torch;
+                torchButton.setText(torch?"🔦 손전등 켜짐":"🔦 손전등 꺼짐");
+                applyCapture();
+            }),
+            pauseButton=pill("⏸ 이동 일시정지",0xFF314862,()->{
+                paused=!paused;tracker.reset();
+                pauseButton.setText(paused?"▶ 이동 다시 시작":"⏸ 이동 일시정지");
+            }));
+        verticalGap(options,14);
+        speedText=heading("커서 속도 · 2.5배",14,WHITE);
+        add(options,speedText);
+        SeekBar seek=new SeekBar(this);
+        seek.setMax(55);
+        seek.setProgress(20);
+        seek.setProgressTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        seek.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             @Override public void onProgressChanged(SeekBar bar,int p,boolean fromUser){
-                speed=(p+5)/10f;speedText.setText(String.format(Locale.KOREA,"커서 속도: %.1f배",speed));
+                speed=(p+5)/10f;
+                speedText.setText(String.format(Locale.KOREA,"커서 속도 · %.1f배",speed));
             }
-            @Override public void onStartTrackingTouch(SeekBar b){}
-            @Override public void onStopTrackingTouch(SeekBar b){}
-        });add(root,seek);
-        flipXButton=button("가로 방향 반전: 꺼짐",()->{
-            flipX=!flipX;flipXButton.setText("가로 방향 반전: "+(flipX?"켜짐":"꺼짐"));
-        });add(root,flipXButton);
-        flipYButton=button("세로 방향 반전: 꺼짐",()->{
-            flipY=!flipY;flipYButton.setText("세로 방향 반전: "+(flipY?"켜짐":"꺼짐"));
-        });add(root,flipYButton);
-        LinearLayout clicks=new LinearLayout(this);
-        clicks.setOrientation(LinearLayout.HORIZONTAL);
-        Button l=button("왼쪽 클릭",()->hid.click(false));
-        Button r=button("오른쪽 클릭",()->hid.click(true));
-        clicks.addView(l,new LinearLayout.LayoutParams(0,dp(55),1));
-        clicks.addView(r,new LinearLayout.LayoutParams(0,dp(55),1));
-        add(root,clicks);
-        LinearLayout wheels=new LinearLayout(this);
-        wheels.setOrientation(LinearLayout.HORIZONTAL);
-        wheels.addView(button("위로 스크롤",()->hid.wheel(true)),new LinearLayout.LayoutParams(0,dp(55),1));
-        wheels.addView(button("아래로 스크롤",()->hid.wheel(false)),new LinearLayout.LayoutParams(0,dp(55),1));
-        add(root,wheels);
-        add(root,label("사용법: 카메라를 바닥에서 약 5~15cm 띄우고 천천히 움직이세요. 무늬 있는 매트에서 가장 잘 동작합니다. 손전등과 카메라를 오래 사용하면 배터리가 빨리 줄어듭니다.",false));
-        add(root,label("주의: 제조사 설정에 따라 블루투스 마우스 등록이 거부될 수 있습니다. 설치 자체가 연결 성공을 보장하지는 않습니다.",false));
+            @Override public void onStartTrackingTouch(SeekBar bar){}
+            @Override public void onStopTrackingTouch(SeekBar bar){}
+        });
+        add(options,seek);
+        verticalGap(options,5);
+        motion.setTextColor(MUTED);
+        motion.setTextSize(13);
+        add(options,motion);
+        verticalGap(options,9);
+
+        LinearLayout advanced=new LinearLayout(this);
+        advanced.setOrientation(LinearLayout.VERTICAL);
+        advanced.setVisibility(android.view.View.GONE);
+        pairRow(advanced,
+            flipXButton=pill("가로 반전 · 꺼짐",0xFF29394E,()->{
+                flipX=!flipX;flipXButton.setText("가로 반전 · "+(flipX?"켜짐":"꺼짐"));
+            }),
+            flipYButton=pill("세로 반전 · 꺼짐",0xFF29394E,()->{
+                flipY=!flipY;flipYButton.setText("세로 반전 · "+(flipY?"켜짐":"꺼짐"));
+            }));
+        TextView more=pill("방향 조정 펼치기  ▾",0xFF24334A,()->{});
+        more.setOnClickListener(v->{
+            boolean visible=advanced.getVisibility()==android.view.View.VISIBLE;
+            advanced.setVisibility(visible?android.view.View.GONE:android.view.View.VISIBLE);
+            more.setText(visible?"방향 조정 펼치기  ▾":"방향 조정 접기  ▴");
+        });
+        add(options,more);
+        verticalGap(options,9);
+        add(options,advanced);
+        add(root,options);
+        verticalGap(root,16);
+
+        TextView note=heading("카메라를 바닥에서 5~15cm 정도 띄워 보세요. 무늬 있는 매트에서 더 잘 작동합니다. 블루투스 마우스 기능은 기기마다 지원 여부가 다릅니다.",12,MUTED);
+        add(root,note);
     }
     private boolean hasPermissions(){
         if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)return false;
