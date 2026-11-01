@@ -140,6 +140,22 @@ final class HidMouseController {
         }catch(Exception e){return false;}
     }
     void move(int x,int y) { synchronized(lock){report(x,y,0);} }
+    // 1=left, 2=right, 4=wheel. Keep the button held for dragging.
+    void buttonDown(int button) {
+        if(button != 1 && button != 2 && button != 4) return;
+        synchronized(lock) {
+            buttons |= button;
+            report(0,0,0);
+        }
+    }
+    void buttonUp(int button) {
+        if(button != 1 && button != 2 && button != 4) return;
+        synchronized(lock) {
+            buttons &= ~button;
+            report(0,0,0);
+        }
+    }
+
     void click(boolean right) {
         int mask=right?2:1;
         synchronized(lock){buttons|=mask;report(0,0,0);}
