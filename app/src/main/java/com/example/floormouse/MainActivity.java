@@ -237,7 +237,7 @@ public class MainActivity extends Activity {
         verticalGap(cameraCard,10);
         previewView=new TextureView(this);
         previewView.setOpaque(true);
-        previewView.setBackground(rounded(0xFF101923,13));
+        // TextureView does not support background drawables on Android.
         previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             @Override public void onSurfaceTextureAvailable(SurfaceTexture surface,int width,int height){
                 if(hasPermissions())startCamera();
