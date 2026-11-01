@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_PERMISSIONS=8;
     private HidMouseController hid;
     private TextView status, motion, speedText;
-    private Button pauseButton, torchButton, flipXButton, flipYButton;
+    private TextView pauseButton, torchButton, flipXButton, flipYButton;
     private final MotionTracker tracker=new MotionTracker();
     private final Handler ui=new Handler(Looper.getMainLooper());
     private HandlerThread cameraThread;
