@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.*;
 import android.hardware.camera2.params.StreamConfigurationMap;
@@ -18,6 +19,7 @@ import android.os.*;
 import android.provider.Settings;
 import android.util.Size;
 import android.view.Surface;
+import android.view.TextureView;
 import android.view.WindowManager;
 import android.widget.*;
 import java.nio.ByteBuffer;
@@ -38,6 +40,10 @@ public class MainActivity extends Activity {
     private CameraCaptureSession cameraSession;
     private CaptureRequest.Builder request;
     private ImageReader reader;
+    private TextureView previewView;
+    private Surface previewSurface;
+    private float smoothX=0f, smoothY=0f;
+    private int missingFrames=0;
     private final AtomicBoolean cameraStarting=new AtomicBoolean();
     private volatile boolean paused=false, torch=true, flipX=false, flipY=false;
     private volatile float speed=2.5f;
@@ -153,21 +159,47 @@ public class MainActivity extends Activity {
         add(root,status);
         verticalGap(root,5);
 
-        MouseSurfaceView mouse=new MouseSurfaceView(this,new MouseSurfaceView.Listener(){
-            @Override public void buttonDown(int button){hid.buttonDown(button);}
-            @Override public void buttonUp(int button){hid.buttonUp(button);}
-            @Override public void wheel(int ticks){
-                int n=Math.min(10,Math.abs(ticks));
-                for(int i=0;i<n;i++)hid.wheel(ticks>0);
+        LinearLayout cameraCard=card();
+        add(cameraCard,heading("📷 실시간 바닥 카메라",17,WHITE));
+        verticalGap(cameraCard,10);
+        previewView=new TextureView(this);
+        previewView.setOpaque(true);
+        previewView.setBackground(rounded(0xFF101923,13));
+        previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
+            @Override public void onSurfaceTextureAvailable(SurfaceTexture surface,int width,int height){
+                if(hasPermissions())startCamera();
             }
+            @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface,int width,int height){}
+            @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface){return true;}
+            @Override public void onSurfaceTextureUpdated(SurfaceTexture surface){}
         });
+        cameraCard.addView(previewView,new LinearLayout.LayoutParams(-1,dp(155)));
+        verticalGap(cameraCard,7);
+        add(cameraCard,heading("카메라가 바라보는 바닥을 실시간으로 표시합니다.",12,MUTED));
+        add(root,cameraCard);
+        verticalGap(root,12);
+
+        CustomButtonPanel mouse=new CustomButtonPanel(this,hid);
         add(root,mouse);
         LinearLayout.LayoutParams mouseParams=(LinearLayout.LayoutParams)mouse.getLayoutParams();
-        mouseParams.height=dp(393);
+        mouseParams.height=dp(370);
         mouse.setLayoutParams(mouseParams);
-        TextView instruction=heading("왼쪽·오른쪽 누르기   |   가운데 휠 쓸기",13,MUTED);
+
+        TextView instruction=heading("왼쪽·오른쪽 클릭  |  휠 스크롤  |  사용자 버튼",13,MUTED);
         instruction.setGravity(android.view.Gravity.CENTER);
         add(root,instruction);
+        verticalGap(root,9);
+
+        TextView editButton=pill("✎ 버튼 편집",0xFF314862,()->{});
+        editButton.setOnClickListener(v->{
+            mouse.setEditing(!mouse.isEditing());
+            editButton.setText(mouse.isEditing()?"✓ 편집 완료":"✎ 버튼 편집");
+            status.setText(mouse.isEditing()
+                ?"편집 중: 추가한 버튼을 끌어서 이동하거나 눌러 수정하세요."
+                :"버튼 배치를 저장했어요.");
+        });
+        pairRow(root,
+            pill("＋ 버튼 추가",ACCENT,()->mouse.addButton()),editButton);
         verticalGap(root,15);
 
         LinearLayout connection=card();
@@ -197,6 +229,7 @@ public class MainActivity extends Activity {
             }),
             pauseButton=pill("⏸ 이동 일시정지",0xFF314862,()->{
                 paused=!paused;tracker.reset();
+                smoothX=0;smoothY=0;residualX=0;residualY=0;missingFrames=0;
                 pauseButton.setText(paused?"▶ 이동 다시 시작":"⏸ 이동 일시정지");
             }));
         verticalGap(options,14);
@@ -303,7 +336,8 @@ public class MainActivity extends Activity {
     }
     @SuppressLint("MissingPermission")
     private void startCamera(){
-        if(!hasPermissions()||!cameraStarting.compareAndSet(false,true))return;
+        if(!hasPermissions() || previewView==null || !previewView.isAvailable())return;
+        if(!cameraStarting.compareAndSet(false,true))return;
         cameraThread=new HandlerThread("floor-camera");
         cameraThread.start();cameraHandler=new Handler(cameraThread.getLooper());
         cameraManager=(CameraManager)getSystemService(CAMERA_SERVICE);
@@ -341,13 +375,18 @@ public class MainActivity extends Activity {
                 @Override public void onOpened(CameraDevice c){
                     camera=c;
                     try{
-                        c.createCaptureSession(Collections.singletonList(reader.getSurface()),
+                        SurfaceTexture texture=previewView.getSurfaceTexture();
+                        if(texture==null){cameraStarting.set(false);return;}
+                        texture.setDefaultBufferSize(reader.getWidth(),reader.getHeight());
+                        previewSurface=new Surface(texture);
+                        c.createCaptureSession(Arrays.asList(reader.getSurface(),previewSurface),
                             new CameraCaptureSession.StateCallback(){
                                 @Override public void onConfigured(CameraCaptureSession session){
                                     cameraSession=session;
                                     try{
                                         request=c.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                                         request.addTarget(reader.getSurface());
+                                        request.addTarget(previewSurface);
                                         request.set(CaptureRequest.CONTROL_AF_MODE,CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
                                         request.set(CaptureRequest.CONTROL_AE_MODE,CaptureRequest.CONTROL_AE_MODE_ON);
                                         applyCapture();
@@ -396,19 +435,37 @@ public class MainActivity extends Activity {
             String s=m==null?"바닥 무늬 추적 중: 움직임 없음":"감지 이동: 가로 "+m.dx+", 세로 "+m.dy;
             ui.post(()->motion.setText(s));
         }
-        if(m==null||paused||!hid.isConnected())return;
-        // Movement is camera-image-relative; use invert controls if the orientation differs.
-        float x=(flipX?-m.dx:m.dx)*speed+residualX;
-        float y=(flipY?-m.dy:m.dy)*speed+residualY;
+        // Apply a low-pass filter and bridge only a very brief loss of camera frames.
+        // Stop quickly on prolonged tracking loss so the pointer cannot drift.
+        if(m!=null){
+            float rawX=(flipX?-m.dx:m.dx)*speed;
+            float rawY=(flipY?-m.dy:m.dy)*speed;
+            smoothX=smoothX*0.52f+rawX*0.48f;
+            smoothY=smoothY*0.52f+rawY*0.48f;
+            missingFrames=0;
+        } else {
+            missingFrames++;
+            if(missingFrames<=2){
+                smoothX*=0.6f; smoothY*=0.6f;
+            } else {
+                smoothX=0f; smoothY=0f;
+            }
+        }
+        if(paused||!hid.isConnected()){
+            residualX=0;residualY=0;return;
+        }
+        float x=smoothX+residualX;
+        float y=smoothY+residualY;
         int dx=Math.max(-127,Math.min(127,Math.round(x)));
         int dy=Math.max(-127,Math.min(127,Math.round(y)));
         residualX=x-dx;residualY=y-dy;
-        hid.move(dx,dy);
+        if(dx!=0 || dy!=0) hid.move(dx,dy);
     }
     @Override protected void onDestroy(){
         try{if(cameraSession!=null)cameraSession.close();}catch(Exception ignored){}
         try{if(camera!=null)camera.close();}catch(Exception ignored){}
         try{if(reader!=null)reader.close();}catch(Exception ignored){}
+        try{if(previewSurface!=null)previewSurface.release();}catch(Exception ignored){}
         if(cameraThread!=null){cameraThread.quitSafely();}
         hid.close();super.onDestroy();
     }
