@@ -8,8 +8,8 @@ android {
         applicationId = "com.example.floormouse"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.2.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
