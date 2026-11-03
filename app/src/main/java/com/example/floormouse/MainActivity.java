@@ -37,6 +37,32 @@ public class MainActivity extends Activity {
     private TextView pauseButton, torchButton, flipXButton, flipYButton;
     private final MotionTracker tracker=new MotionTracker();
     private final FloorSurfaceDetector floorDetector=new FloorSurfaceDetector();
+    private final GyroPointer gyroPointer=new GyroPointer();
+    private Sensor gyroSensor;
+    private volatile int pointerMode=0; // 0 camera, 1 gyroscope, 2 touchpad
+    private volatile float gyroSensitivity=1f;
+    private float touchRemainderX=0f,touchRemainderY=0f;
+    private TextView gyroStatus, gyroSensitivityText;
+    private TextView[] modeButtons;
+    private TouchpadSurfaceView touchpadView;
+    private int gyroEvents;
+    private final SensorEventListener gyroListener=new SensorEventListener(){
+        @Override public void onSensorChanged(SensorEvent event){
+            if(pointerMode!=1 || event.values.length<2)return;
+            if(++gyroEvents%20==0 && gyroStatus!=null) {
+                String label=gyroSensor==null?"자이로스코프 사용 불가":"자이로스코프 감지 중";
+                gyroStatus.setText(label);
+            }
+            if(paused || hid==null || !hid.isConnected()){
+                gyroPointer.reset();return;
+            }
+            GyroPointer.Delta motion=gyroPointer.update(
+                event.values[0],event.values[1],event.timestamp,
+                speed,gyroSensitivity,flipX,flipY);
+            if(motion.dx!=0 || motion.dy!=0)hid.move(motion.dx,motion.dy);
+        }
+        @Override public void onAccuracyChanged(Sensor sensor,int accuracy){}
+    };
     private TextView floorStatus, floorGuardButton, floorSensitivityButton;
     private volatile boolean floorGuard=true;
     private volatile int floorSensitivity=1; // 0: forgiving, 1: normal, 2: strict
@@ -80,7 +106,11 @@ public class MainActivity extends Activity {
             if(sensorManager!=null){
                 gravitySensor=sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY);
                 if(gravitySensor==null)gravitySensor=sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+                gyroSensor=sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
             }
+            pointerMode=getPreferences(MODE_PRIVATE).getInt("pointer_mode",0);
+            if(pointerMode<0||pointerMode>2)pointerMode=0;
+            gyroSensitivity=getPreferences(MODE_PRIVATE).getFloat("gyro_sensitivity",1f);
             hid=new HidMouseController(this, msg -> {
                 if(status!=null) status.setText(msg);
             });
@@ -189,6 +219,45 @@ public class MainActivity extends Activity {
     private TextView settingsTab;
     private CustomButtonPanel mousePanel;
 
+    private void selectPointerMode(int selected){
+        if(selected<0||selected>2)return;
+        pointerMode=selected;
+        getPreferences(MODE_PRIVATE).edit().putInt("pointer_mode",selected).apply();
+        gyroPointer.reset();
+        touchRemainderX=touchRemainderY=0f;
+        if(touchpadView!=null)touchpadView.cancelTouch();
+        if(mousePanel!=null)mousePanel.setVisibility(selected==2?android.view.View.GONE:android.view.View.VISIBLE);
+        if(touchpadView!=null)touchpadView.setVisibility(selected==2?android.view.View.VISIBLE:android.view.View.GONE);
+        if(modeButtons!=null) {
+            for(int i=0;i<modeButtons.length;i++) {
+                modeButtons[i].setBackground(rounded(i==selected?ACCENT:0xFF314862,12));
+                modeButtons[i].setTextColor(i==selected?WHITE:MUTED);
+            }
+        }
+        if(selected!=0){
+            if(cameraSession!=null){
+                try {cameraSession.stopRepeating();}catch(Exception ignored){}
+            }
+            if(motion!=null)motion.setText(selected==1?"자이로스코프 모드":"터치패드 모드");
+        } else {
+            if(cameraSession!=null)applyCapture();
+            else if(hasPermissions())startCamera();
+        }
+        if(selected==1 && gyroSensor==null && gyroStatus!=null)
+            gyroStatus.setText("이 기기에서 자이로스코프를 찾지 못했습니다.");
+    }
+
+    private void sendTouchpadMove(float dx,float dy){
+        if(pointerMode!=2 || paused || hid==null || !hid.isConnected())return;
+        float sensitivity=Math.max(0.2f,speed/2.5f);
+        float x=dx*sensitivity+touchRemainderX;
+        float y=dy*sensitivity+touchRemainderY;
+        int ix=Math.max(-127,Math.min(127,Math.round(x)));
+        int iy=Math.max(-127,Math.min(127,Math.round(y)));
+        touchRemainderX=x-ix;touchRemainderY=y-iy;
+        if(ix!=0||iy!=0)hid.move(ix,iy);
+    }
+
     private TextView tabButton(String title){
         TextView v=heading(title,16,WHITE);
         v.setGravity(android.view.Gravity.CENTER);
@@ -278,6 +347,49 @@ public class MainActivity extends Activity {
                 else status.setText("먼저 다른 기기와 연결해 주세요.");
             }));
         add(settingsRoot,connection);
+        verticalGap(settingsRoot,12);
+
+        LinearLayout modes=card();
+        add(modes,heading("마우스 조작 방식",17,WHITE));
+        verticalGap(modes,9);
+        add(modes,heading("세 가지 중 하나를 선택하세요. 블루투스 연결은 공통으로 사용합니다.",12,MUTED));
+        verticalGap(modes,12);
+        LinearLayout modeRow=new LinearLayout(this);
+        modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        modeButtons=new TextView[3];
+        String[] names={"📷 바닥","🔄 자이로","☝ 터치패드"};
+        for(int i=0;i<3;i++) {
+            final int index=i;
+            TextView pick=pill(names[i],0xFF314862,()->selectPointerMode(index));
+            modeButtons[i]=pick;
+            LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(52),1);
+            if(i!=0)p.leftMargin=dp(7);
+            modeRow.addView(pick,p);
+        }
+        add(modes,modeRow);
+        verticalGap(modes,10);
+        gyroStatus=heading(gyroSensor==null?"자이로스코프 센서 없음":"자이로스코프 사용 가능",13,MUTED);
+        add(modes,gyroStatus);
+        verticalGap(modes,7);
+        gyroSensitivityText=heading("자이로 감도 · "+String.format(Locale.KOREA,"%.1f",gyroSensitivity)+"배",14,WHITE);
+        add(modes,gyroSensitivityText);
+        SeekBar gyroSeek=new SeekBar(this);
+        gyroSeek.setMax(40);
+        gyroSeek.setProgress(Math.max(0,Math.min(40,Math.round((gyroSensitivity-0.5f)*20f))));
+        gyroSeek.setProgressTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        gyroSeek.setThumbTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        gyroSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar view,int amount,boolean fromUser){
+                gyroSensitivity=0.5f+amount/20f;
+                gyroSensitivityText.setText(String.format(Locale.KOREA,"자이로 감도 · %.1f배",gyroSensitivity));
+                if(fromUser)getPreferences(MODE_PRIVATE).edit().putFloat("gyro_sensitivity",gyroSensitivity).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar v){}
+            @Override public void onStopTrackingTouch(SeekBar v){}
+        });
+        add(modes,gyroSeek);
+        add(modes,heading("자이로 모드는 휴대폰을 좌우·상하로 돌려 이동합니다. 터치패드는 한 손가락 이동, 두 손가락 스크롤입니다.",12,MUTED));
+        add(settingsRoot,modes);
         verticalGap(settingsRoot,12);
 
         LinearLayout cameraCard=card();
@@ -418,7 +530,19 @@ public class MainActivity extends Activity {
         mousePage.setClickable(true);
         mousePanel=new CustomButtonPanel(this,hid);
         mousePage.addView(mousePanel,new LinearLayout.LayoutParams(-1,0,1));
+        touchpadView=new TouchpadSurfaceView(this,new TouchpadSurfaceView.Listener(){
+            @Override public void move(float dx,float dy){sendTouchpadMove(dx,dy);}
+            @Override public void wheel(int ticks){
+                if(pointerMode!=2)return;
+                for(int n=0;n<Math.min(8,Math.abs(ticks));n++)hid.wheel(ticks>0);
+            }
+            @Override public void click(int button){if(pointerMode==2)hid.click(button==2);}
+            @Override public void buttonDown(int button){if(pointerMode==2)hid.buttonDown(button);}
+            @Override public void buttonUp(int button){hid.buttonUp(button);}
+        });
+        mousePage.addView(touchpadView,new LinearLayout.LayoutParams(-1,0,1));
         tabPages.addView(mousePage,new FrameLayout.LayoutParams(-1,-1));
+        selectPointerMode(pointerMode);
 
         mouseTab.setOnClickListener(v->showTab(false));
         settingsTab.setOnClickListener(v->showTab(true));
@@ -574,6 +698,7 @@ public class MainActivity extends Activity {
                 gray[y*MotionTracker.WIDTH+x]=buf.get(sy*stride+sx*step);
             }
         }
+        if(pointerMode!=0)return;
         FloorSurfaceDetector.Reading floor=floorDetector.evaluate(gray,gravityZ,floorSensitivity);
         final boolean usable=!floorGuard || floor.locked;
         if(++frames%12==0){
@@ -628,9 +753,15 @@ public class MainActivity extends Activity {
         super.onResume();
         if(sensorManager!=null && gravitySensor!=null)
             sensorManager.registerListener(gravityListener,gravitySensor,SensorManager.SENSOR_DELAY_GAME);
+        if(sensorManager!=null && gyroSensor!=null)
+            sensorManager.registerListener(gyroListener,gyroSensor,SensorManager.SENSOR_DELAY_GAME);
     }
     @Override protected void onPause(){
-        if(sensorManager!=null) sensorManager.unregisterListener(gravityListener);
+        if(sensorManager!=null) {
+            sensorManager.unregisterListener(gravityListener);
+            sensorManager.unregisterListener(gyroListener);
+        }
+        gyroPointer.reset();
         super.onPause();
     }
     @Override protected void onDestroy(){
