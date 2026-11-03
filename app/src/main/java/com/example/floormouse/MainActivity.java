@@ -240,8 +240,10 @@ public class MainActivity extends Activity {
             }
             if(motion!=null)motion.setText(selected==1?"자이로스코프 모드":"터치패드 모드");
         } else {
-            if(cameraSession!=null)applyCapture();
-            else if(hasPermissions())startCamera();
+            if(!hasCameraPermission()){
+                if(previewView!=null && previewView.isAttachedToWindow())ensurePermissions();
+            } else if(cameraSession!=null)applyCapture();
+            else startCamera();
         }
         if(selected==1 && gyroSensor==null && gyroStatus!=null)
             gyroStatus.setText("이 기기에서 자이로스코프를 찾지 못했습니다.");
@@ -400,7 +402,7 @@ public class MainActivity extends Activity {
         // TextureView does not support background drawables on Android.
         previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             @Override public void onSurfaceTextureAvailable(SurfaceTexture surface,int width,int height){
-                if(hasPermissions())startCamera();
+                if(pointerMode==0 && hasCameraPermission())startCamera();
             }
             @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface,int width,int height){}
             @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface){return true;}
@@ -548,30 +550,38 @@ public class MainActivity extends Activity {
         settingsTab.setOnClickListener(v->showTab(true));
         showTab(false);
     }
+    private boolean hasCameraPermission(){
+        return checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED;
+    }
+    private boolean hasBluetoothPermissions(){
+        return Build.VERSION.SDK_INT<31 ||
+            (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED &&
+             checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)==PackageManager.PERMISSION_GRANTED);
+    }
     private boolean hasPermissions(){
-        if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)return false;
-        if(Build.VERSION.SDK_INT>=31){
-            return checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED
-                 &&checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)==PackageManager.PERMISSION_GRANTED;
-        }
-        return true;
+        return hasBluetoothPermissions() && (pointerMode!=0 || hasCameraPermission());
     }
     private void ensurePermissions(){
         if(!hasPermissions()){
-            ArrayList<String> p=new ArrayList<>();
-            p.add(Manifest.permission.CAMERA);
-            if(Build.VERSION.SDK_INT>=31){
-                p.add(Manifest.permission.BLUETOOTH_CONNECT);
-                p.add(Manifest.permission.BLUETOOTH_ADVERTISE);
+            ArrayList<String> requests=new ArrayList<>();
+            if(pointerMode==0 && !hasCameraPermission())requests.add(Manifest.permission.CAMERA);
+            if(Build.VERSION.SDK_INT>=31 && !hasBluetoothPermissions()){
+                requests.add(Manifest.permission.BLUETOOTH_CONNECT);
+                requests.add(Manifest.permission.BLUETOOTH_ADVERTISE);
             }
-            requestPermissions(p.toArray(new String[0]),REQUEST_PERMISSIONS);
-        } else {startCamera();hid.start();}
+            if(!requests.isEmpty())requestPermissions(requests.toArray(new String[0]),REQUEST_PERMISSIONS);
+        } else {
+            if(pointerMode==0)startCamera();
+            if(hid!=null)hid.start();
+        }
     }
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){
         super.onRequestPermissionsResult(code,permissions,results);
         if(code==REQUEST_PERMISSIONS){
-            if(hasPermissions()){startCamera();hid.start();}
-            else status.setText("카메라와 주변 기기 권한을 허용해야 합니다.");
+            if(hasPermissions()){
+                if(pointerMode==0)startCamera();
+                if(hid!=null)hid.start();
+            } else status.setText("현재 모드의 카메라 또는 주변 기기 권한이 필요합니다.");
         }
     }
     @SuppressLint("MissingPermission")
@@ -604,7 +614,7 @@ public class MainActivity extends Activity {
     }
     @SuppressLint("MissingPermission")
     private void startCamera(){
-        if(!hasPermissions() || previewView==null || !previewView.isAvailable())return;
+        if(pointerMode!=0 || !hasCameraPermission() || previewView==null || !previewView.isAvailable())return;
         if(!cameraStarting.compareAndSet(false,true))return;
         cameraThread=new HandlerThread("floor-camera");
         cameraThread.start();cameraHandler=new Handler(cameraThread.getLooper());
