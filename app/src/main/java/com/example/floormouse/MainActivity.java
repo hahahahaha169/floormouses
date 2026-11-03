@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private TextView[] modeButtons;
     private TouchpadSurfaceView touchpadView;
     private int gyroEvents;
+    private boolean uiReady=false;
     private final SensorEventListener gyroListener=new SensorEventListener(){
         @Override public void onSensorChanged(SensorEvent event){
             if(pointerMode!=1 || event.values.length<2)return;
@@ -241,7 +242,7 @@ public class MainActivity extends Activity {
             if(motion!=null)motion.setText(selected==1?"자이로스코프 모드":"터치패드 모드");
         } else {
             if(!hasCameraPermission()){
-                if(previewView!=null && previewView.isAttachedToWindow())ensurePermissions();
+                if(uiReady)ensurePermissions();
             } else if(cameraSession!=null)applyCapture();
             else startCamera();
         }
@@ -549,6 +550,7 @@ public class MainActivity extends Activity {
         mouseTab.setOnClickListener(v->showTab(false));
         settingsTab.setOnClickListener(v->showTab(true));
         showTab(false);
+        uiReady=true;
     }
     private boolean hasCameraPermission(){
         return checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED;
