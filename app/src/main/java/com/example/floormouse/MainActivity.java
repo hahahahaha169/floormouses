@@ -12,6 +12,10 @@ import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.*;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
@@ -32,6 +36,22 @@ public class MainActivity extends Activity {
     private TextView status, motion, speedText;
     private TextView pauseButton, torchButton, flipXButton, flipYButton;
     private final MotionTracker tracker=new MotionTracker();
+    private final FloorSurfaceDetector floorDetector=new FloorSurfaceDetector();
+    private TextView floorStatus, floorGuardButton, floorSensitivityButton;
+    private volatile boolean floorGuard=true;
+    private volatile int floorSensitivity=1; // 0: forgiving, 1: normal, 2: strict
+    private SensorManager sensorManager;
+    private Sensor gravitySensor;
+    private volatile float gravityZ=Float.NaN;
+    private final SensorEventListener gravityListener=new SensorEventListener(){
+        @Override public void onSensorChanged(SensorEvent event){
+            if(event.values.length<3)return;
+            float z=event.values[2];
+            if(Float.isNaN(gravityZ))gravityZ=z;
+            else gravityZ=gravityZ*0.85f+z*0.15f;
+        }
+        @Override public void onAccuracyChanged(Sensor sensor,int accuracy){}
+    };
     private final Handler ui=new Handler(Looper.getMainLooper());
     private HandlerThread cameraThread;
     private Handler cameraHandler;
@@ -56,6 +76,11 @@ public class MainActivity extends Activity {
         try {
             status=label("마우스 준비 중...",false);
             motion=label("카메라 준비 중...",false);
+            sensorManager=(SensorManager)getSystemService(SENSOR_SERVICE);
+            if(sensorManager!=null){
+                gravitySensor=sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY);
+                if(gravitySensor==null)gravitySensor=sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            }
             hid=new HidMouseController(this, msg -> {
                 if(status!=null) status.setText(msg);
             });
@@ -273,6 +298,36 @@ public class MainActivity extends Activity {
         verticalGap(cameraCard,7);
         add(cameraCard,heading("바닥을 촬영하는 화면입니다. 마우스 탭에서도 카메라는 계속 움직임을 추적합니다.",12,MUTED));
         add(settingsRoot,cameraCard);
+        verticalGap(settingsRoot,12);
+
+        LinearLayout floorCard=card();
+        add(floorCard,heading("🟩 바닥 인식",17,WHITE));
+        verticalGap(floorCard,6);
+        add(floorCard,heading("후면 카메라의 바닥 무늬, 밝기와 휴대폰 기울기를 감지합니다.",12,MUTED));
+        verticalGap(floorCard,12);
+        floorStatus=heading("바닥 분석 준비 중...",14,0xFFB9DCFF);
+        add(floorCard,floorStatus);
+        verticalGap(floorCard,10);
+        floorGuardButton=pill("바닥 감지 · 켜짐",ACCENT,()->{
+            floorGuard=!floorGuard;
+            floorGuardButton.setText(floorGuard?"바닥 감지 · 켜짐":"바닥 감지 · 꺼짐");
+            if(!floorGuard)floorStatus.setText("바닥 감지 해제됨 · 이동 제한 없음");
+            if(cameraHandler!=null)cameraHandler.post(()->{
+                floorDetector.reset();
+                tracker.reset();
+                smoothX=0;smoothY=0;residualX=0;residualY=0;
+            });
+        });
+        floorSensitivityButton=pill("인식 기준 · 보통",0xFF314862,()->{
+            floorSensitivity=(floorSensitivity+1)%3;
+            String name=floorSensitivity==0?"느슨하게":floorSensitivity==1?"보통":"엄격하게";
+            floorSensitivityButton.setText("인식 기준 · "+name);
+            if(cameraHandler!=null)cameraHandler.post(floorDetector::reset);
+        });
+        pairRow(floorCard,floorGuardButton,floorSensitivityButton);
+        verticalGap(floorCard,7);
+        add(floorCard,heading("바닥을 인식하지 못하면 커서가 멈추고, 클릭과 휠은 그대로 사용할 수 있습니다.",12,MUTED));
+        add(settingsRoot,floorCard);
         verticalGap(settingsRoot,12);
 
         LinearLayout options=card();
@@ -519,8 +574,27 @@ public class MainActivity extends Activity {
                 gray[y*MotionTracker.WIDTH+x]=buf.get(sy*stride+sx*step);
             }
         }
+        FloorSurfaceDetector.Reading floor=floorDetector.evaluate(gray,gravityZ,floorSensitivity);
+        final boolean usable=!floorGuard || floor.locked;
+        if(++frames%12==0){
+            final String floorMessage=floorGuard
+                ? floor.description+"  (밝기 "+floor.brightness+" · 무늬 "+String.format(Locale.KOREA,"%.1f",floor.texture)+")"
+                : "바닥 감지 꺼짐 · 커서 제한 없음";
+            ui.post(()->{
+                if(floorStatus!=null){
+                    floorStatus.setText(floorMessage);
+                    floorStatus.setTextColor(!floorGuard || floor.locked?0xFF86EFAC:0xFFFBBF24);
+                }
+            });
+        }
+        if(!usable){
+            tracker.reset();
+            smoothX=0;smoothY=0;residualX=0;residualY=0;
+            missingFrames=0;
+            return;
+        }
         MotionTracker.Motion m=tracker.track(gray);
-        if(++frames%20==0){
+        if(frames%20==0){
             String s=m==null?"바닥 무늬 추적 중: 움직임 없음":"감지 이동: 가로 "+m.dx+", 세로 "+m.dy;
             ui.post(()->motion.setText(s));
         }
@@ -549,6 +623,15 @@ public class MainActivity extends Activity {
         int dy=Math.max(-127,Math.min(127,Math.round(y)));
         residualX=x-dx;residualY=y-dy;
         if(dx!=0 || dy!=0) hid.move(dx,dy);
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        if(sensorManager!=null && gravitySensor!=null)
+            sensorManager.registerListener(gravityListener,gravitySensor,SensorManager.SENSOR_DELAY_GAME);
+    }
+    @Override protected void onPause(){
+        if(sensorManager!=null) sensorManager.unregisterListener(gravityListener);
+        super.onPause();
     }
     @Override protected void onDestroy(){
         try{if(cameraSession!=null)cameraSession.close();}catch(Exception ignored){}
